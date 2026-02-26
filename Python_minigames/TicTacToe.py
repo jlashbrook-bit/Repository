@@ -539,4 +539,3 @@ if __name__ == "__main__":
 
     if selected_mode is not None:
         TicTacToe(selected_mode, selected_difficulty).mainloop()
-
