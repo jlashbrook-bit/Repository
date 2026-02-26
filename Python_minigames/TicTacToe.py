@@ -15,11 +15,48 @@ def center_window(window, width, height):
 
 
 # -------------------------
+# RESET POPUP WINDOW
+# -------------------------
+
+class ResetPopup(ctk.CTkToplevel):
+    def __init__(self, parent):
+        super().__init__(parent)
+        self.title("Reset Game")
+        self.geometry("300x180")
+        center_window(self, 300, 180)
+        self.parent = parent
+
+        label = ctk.CTkLabel(self, text="Reset the scores too?", font=ctk.CTkFont(size=16))
+        label.pack(pady=20)
+
+        btn_frame = ctk.CTkFrame(self, fg_color="transparent")
+        btn_frame.pack(pady=10)
+
+        yes_btn = ctk.CTkButton(btn_frame, text="Yes", width=80, command=self.reset_with_scores)
+        no_btn = ctk.CTkButton(btn_frame, text="No", width=80, command=self.reset_without_scores)
+
+        yes_btn.pack(side="left", padx=10)
+        no_btn.pack(side="left", padx=10)
+
+    def reset_with_scores(self):
+        self.parent.x_wins = 0
+        self.parent.o_wins = 0
+        self.parent.ties = 0
+        self.parent.update_scoreboard()
+        self.parent.reset_board()
+        self.destroy()
+
+    def reset_without_scores(self):
+        self.parent.reset_board()
+        self.destroy()
+
+
+# -------------------------
 # MODE & DIFFICULTY WINDOWS
 # -------------------------
 
-selected_mode = None       # "pvp" or "ai"
-selected_difficulty = None # "easy", "medium", "unbeatable" or None
+selected_mode = None
+selected_difficulty = None
 
 
 class ModeWindow(ctk.CTk):
@@ -77,12 +114,10 @@ class TicTacToe(ctk.CTk):
         self.title("Tic Tac Toe")
         self.geometry("800x600")
         center_window(self, 800, 600)
-        self.minsize(800, 600)
-        self.maxsize(800, 600)
 
-        self.mode = mode              # "pvp" or "ai"
-        self.difficulty = difficulty  # None, "easy", "medium", "unbeatable"
-        self.turn = True              # True = X, False = O (or AI)
+        self.mode = mode
+        self.difficulty = difficulty
+        self.turn = True
         self.game_over = False
 
         # Scoreboard
@@ -90,7 +125,11 @@ class TicTacToe(ctk.CTk):
         self.o_wins = 0
         self.ties = 0
 
-        # Layout: left = board, right = sidebar
+        # Difficulty adjustment counters
+        self.loss_streak = 0
+        self.tie_streak = 0
+
+        # Layout
         self.columnconfigure(0, weight=3)
         self.columnconfigure(1, weight=1)
         self.rowconfigure(0, weight=1)
@@ -103,12 +142,9 @@ class TicTacToe(ctk.CTk):
             self.board_frame.columnconfigure(i, weight=1)
             self.board_frame.rowconfigure(i, weight=1)
 
-        # Sidebar frame
+        # Sidebar
         self.sidebar = ctk.CTkFrame(self)
         self.sidebar.grid(row=0, column=1, sticky="nsew", padx=10, pady=10)
-        self.sidebar.rowconfigure(0, weight=0)
-        self.sidebar.rowconfigure(1, weight=0)
-        self.sidebar.rowconfigure(2, weight=1)
 
         # Scoreboard UI
         title = ctk.CTkLabel(self.sidebar, text="SCOREBOARD", font=ctk.CTkFont(size=20, weight="bold"))
@@ -122,10 +158,19 @@ class TicTacToe(ctk.CTk):
         self.score_o_label.grid(row=1, column=0, sticky="n", pady=(30, 0))
         self.score_ties_label.grid(row=1, column=0, sticky="n", pady=(55, 0))
 
-        # End-of-game prompt panel (under scoreboard)
+        # Reset button
+        self.reset_button = ctk.CTkButton(
+            self.sidebar,
+            text="Reset Game",
+            width=120,
+            command=self.open_reset_popup
+        )
+        self.reset_button.grid(row=1, column=0, pady=(110, 0))
+
+        # End panel
         self.end_panel = ctk.CTkFrame(self.sidebar)
-        self.end_panel.grid(row=2, column=0, sticky="n", pady=(40, 0), padx=10)
-        self.end_panel.grid_remove()  # hidden initially
+        self.end_panel.grid(row=2, column=0, sticky="n", pady=(40, 0))
+        self.end_panel.grid_remove()
 
         self.end_label = ctk.CTkLabel(self.end_panel, text="", font=ctk.CTkFont(size=16))
         self.end_label.pack(pady=(10, 10))
@@ -133,21 +178,28 @@ class TicTacToe(ctk.CTk):
         btn_frame = ctk.CTkFrame(self.end_panel, fg_color="transparent")
         btn_frame.pack(pady=(0, 10))
 
-        self.yes_button = ctk.CTkButton(btn_frame, text="Yes", width=70, command=self.reset_board)
+        self.yes_button = ctk.CTkButton(btn_frame, text="Yes", width=70, command=self.handle_yes_button)
         self.no_button = ctk.CTkButton(btn_frame, text="No", width=70, command=self.no_more_play)
 
         self.yes_button.pack(side="left", padx=5)
         self.no_button.pack(side="left", padx=5)
 
-        # Create buttons
+        # Board buttons
         self.buttons = []
-        for row in range(3):
+        for r in range(3):
             row_buttons = []
-            for col in range(3):
-                btn = CellButton(self.board_frame, self, row, col)
-                btn.grid(row=row, column=col, sticky="nsew", padx=5, pady=5)
+            for c in range(3):
+                btn = CellButton(self.board_frame, self, r, c)
+                btn.grid(row=r, column=c, sticky="nsew", padx=5, pady=5)
                 row_buttons.append(btn)
             self.buttons.append(row_buttons)
+
+    # -------------------------
+    # RESET POPUP
+    # -------------------------
+
+    def open_reset_popup(self):
+        ResetPopup(self)
 
     # -------------------------
     # SCOREBOARD
@@ -159,32 +211,26 @@ class TicTacToe(ctk.CTk):
         self.score_ties_label.configure(text=f"Ties: {self.ties}")
 
     # -------------------------
-    # BOARD / WIN LOGIC
+    # WIN LOGIC
     # -------------------------
 
     def board_full(self):
-        for row in self.buttons:
-            for btn in row:
-                if btn.text == "":
-                    return False
-        return True
+        return all(btn.text != "" for row in self.buttons for btn in row)
 
     def has_winner(self, symbol):
         b = self.buttons
 
-        # Rows
         for r in range(3):
-            if b[r][0].text == symbol and b[r][1].text == symbol and b[r][2].text == symbol:
+            if all(b[r][c].text == symbol for c in range(3)):
                 return True
 
-        # Columns
         for c in range(3):
-            if b[0][c].text == symbol and b[1][c].text == symbol and b[2][c].text == symbol:
+            if all(b[r][c].text == symbol for r in range(3)):
                 return True
 
-        # Diagonals
         if b[0][0].text == symbol and b[1][1].text == symbol and b[2][2].text == symbol:
             return True
+
         if b[0][2].text == symbol and b[1][1].text == symbol and b[2][0].text == symbol:
             return True
 
@@ -193,36 +239,27 @@ class TicTacToe(ctk.CTk):
     def get_winning_line(self, symbol):
         b = self.buttons
 
-        # Rows
         for r in range(3):
-            if b[r][0].text == symbol and b[r][1].text == symbol and b[r][2].text == symbol:
+            if all(b[r][c].text == symbol for c in range(3)):
                 return [b[r][0], b[r][1], b[r][2]]
 
-        # Columns
         for c in range(3):
-            if b[0][c].text == symbol and b[1][c].text == symbol and b[2][c].text == symbol:
+            if all(b[r][c].text == symbol for r in range(3)):
                 return [b[0][c], b[1][c], b[2][c]]
 
-        # Diagonals
         if b[0][0].text == symbol and b[1][1].text == symbol and b[2][2].text == symbol:
             return [b[0][0], b[1][1], b[2][2]]
+
         if b[0][2].text == symbol and b[1][1].text == symbol and b[2][0].text == symbol:
             return [b[0][2], b[1][1], b[2][0]]
 
         return None
 
-    def show_end_panel(self, message):
-        self.end_label.configure(text=message + "\nPlay again?")
-        self.end_panel.grid()  # show panel
-
-    def color_board_for_win(self, winner_symbol):
-        winning_line = self.get_winning_line(winner_symbol)
+    def color_board_for_win(self, symbol):
+        winning = self.get_winning_line(symbol)
         for row in self.buttons:
             for btn in row:
-                if winning_line and btn in winning_line:
-                    btn.set_color("green")
-                else:
-                    btn.set_color("red")
+                btn.set_color("green" if btn in winning else "red")
 
     def color_board_for_tie(self):
         for row in self.buttons:
@@ -230,11 +267,35 @@ class TicTacToe(ctk.CTk):
                 btn.set_color("red")
 
     # -------------------------
+    # DIFFICULTY DOWNGRADE
+    # -------------------------
+
+    def decrease_difficulty(self):
+        if self.mode != "ai":
+            return
+
+        order = ["unbeatable", "medium", "easy"]
+
+        if self.difficulty == "easy":
+            self.end_label.configure(text="You're already on Easy.\nPlay again?")
+            return
+
+        idx = order.index(self.difficulty)
+        self.difficulty = order[idx + 1]
+
+        self.end_label.configure(text=f"Difficulty lowered to {self.difficulty.capitalize()}.\nPlay again?")
+
+    def handle_yes_button(self):
+        if "Decrease difficulty?" in self.end_label.cget("text"):
+            self.decrease_difficulty()
+
+        self.reset_board()
+
+    # -------------------------
     # AI LOGIC
     # -------------------------
 
     def find_winning_move(self, symbol):
-        """Return a button that lets 'symbol' win, or None."""
         for r in range(3):
             for c in range(3):
                 btn = self.buttons[r][c]
@@ -246,7 +307,7 @@ class TicTacToe(ctk.CTk):
                     btn.text = ""
         return None
 
-    def minimax(self, is_maximizing):
+    def minimax(self, is_max):
         if self.has_winner("O"):
             return 1
         if self.has_winner("X"):
@@ -254,28 +315,19 @@ class TicTacToe(ctk.CTk):
         if self.board_full():
             return 0
 
-        if is_maximizing:
-            best_score = -999
-            for r in range(3):
-                for c in range(3):
-                    btn = self.buttons[r][c]
-                    if btn.text == "":
-                        btn.text = "O"
-                        score = self.minimax(False)
-                        btn.text = ""
-                        best_score = max(best_score, score)
-            return best_score
-        else:
-            best_score = 999
-            for r in range(3):
-                for c in range(3):
-                    btn = self.buttons[r][c]
-                    if btn.text == "":
-                        btn.text = "X"
-                        score = self.minimax(True)
-                        btn.text = ""
-                        best_score = min(best_score, score)
-            return best_score
+        best = -999 if is_max else 999
+        symbol = "O" if is_max else "X"
+
+        for r in range(3):
+            for c in range(3):
+                btn = self.buttons[r][c]
+                if btn.text == "":
+                    btn.text = symbol
+                    score = self.minimax(not is_max)
+                    btn.text = ""
+                    best = max(best, score) if is_max else min(best, score)
+
+        return best
 
     def best_move_minimax(self):
         best_score = -999
@@ -298,61 +350,74 @@ class TicTacToe(ctk.CTk):
         if self.game_over:
             return
 
-        # EASY: random
         if self.difficulty == "easy":
             empty = [btn for row in self.buttons for btn in row if btn.text == ""]
-            if empty:
-                choice = random.choice(empty)
-                choice.set_symbol("O")
+            random.choice(empty).set_symbol("O")
 
-        # MEDIUM: win → block → random
         elif self.difficulty == "medium":
-            win_btn = self.find_winning_move("O")
-            if win_btn:
-                win_btn.set_symbol("O")
+            win = self.find_winning_move("O")
+            if win:
+                win.set_symbol("O")
             else:
-                block_btn = self.find_winning_move("X")
-                if block_btn:
-                    block_btn.set_symbol("O")
+                block = self.find_winning_move("X")
+                if block:
+                    block.set_symbol("O")
                 else:
                     empty = [btn for row in self.buttons for btn in row if btn.text == ""]
-                    if empty:
-                        random.choice(empty).set_symbol("O")
+                    random.choice(empty).set_symbol("O")
 
-        # UNBEATABLE: minimax
         elif self.difficulty == "unbeatable":
-            best_btn = self.best_move_minimax()
-            if best_btn:
-                best_btn.set_symbol("O")
+            best = self.best_move_minimax()
+            best.set_symbol("O")
 
-        # After AI move, check game state
+        # Check win
         if self.has_winner("O"):
             self.game_over = True
             self.o_wins += 1
+            self.loss_streak += 1
+            self.tie_streak = 0
             self.update_scoreboard()
             self.color_board_for_win("O")
+
+            if self.loss_streak >= 3:
+                self.show_end_panel("Computer (O) wins!\nYou've lost 3 times.\nDecrease difficulty?")
+                self.loss_streak = 0
+                return
+
             self.show_end_panel("Computer (O) wins!")
             return
 
+        # Check tie
         if self.board_full():
             self.game_over = True
             self.ties += 1
+            self.tie_streak += 1
+            self.loss_streak = 0
             self.update_scoreboard()
             self.color_board_for_tie()
+
+            if self.tie_streak >= 5:
+                self.show_end_panel("It's a tie!\nYou've tied 5 times.\nDecrease difficulty?")
+                self.tie_streak = 0
+                return
+
             self.show_end_panel("It's a tie!")
             return
 
-        self.turn = True  # back to player
+        self.turn = True
 
     # -------------------------
     # GAME FLOW
     # -------------------------
 
+    def show_end_panel(self, message):
+        self.end_label.configure(text=message)
+        self.end_panel.grid()
+
     def handle_player_move(self, btn):
         if self.game_over or btn.text != "":
             return
 
-        # PVP mode: alternate X and O
         if self.mode == "pvp":
             symbol = "X" if self.turn else "O"
             btn.set_symbol(symbol)
@@ -378,10 +443,10 @@ class TicTacToe(ctk.CTk):
 
             self.turn = not self.turn
 
-        # AI mode: player is always X
         else:
             if not self.turn:
                 return
+
             btn.set_symbol("X")
 
             if self.has_winner("X"):
@@ -413,9 +478,7 @@ class TicTacToe(ctk.CTk):
                 btn.reset_color()
 
     def no_more_play(self):
-        # Close game and go back to mode selection
         self.destroy()
-        # Restart mode selection flow
         global selected_mode, selected_difficulty
         selected_mode = None
         selected_difficulty = None
@@ -425,6 +488,10 @@ class TicTacToe(ctk.CTk):
         if selected_mode is not None:
             TicTacToe(selected_mode, selected_difficulty).mainloop()
 
+
+# -------------------------
+# CELL BUTTON
+# -------------------------
 
 class CellButton(ctk.CTkButton):
     def __init__(self, parent, game, row, col):
@@ -472,3 +539,4 @@ if __name__ == "__main__":
 
     if selected_mode is not None:
         TicTacToe(selected_mode, selected_difficulty).mainloop()
+
